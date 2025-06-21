@@ -16,8 +16,9 @@ Este projeto consiste na implementação de um **chat UDP de sala única**, onde
 - ✅ Reconstrução dos arquivos no servidor e nos clientes.  
 - ✅ Exibição das mensagens no seguinte formato:  
 
+```
 <IP>:<PORTA>/~<nome_usuario>: <mensagem> <hora-data>
-
+```
 
 - ✅ Notificação quando um usuário entra ou sai da sala.  
 - ✅ Comandos básicos via terminal.  
@@ -36,14 +37,14 @@ Este projeto consiste na implementação de um **chat UDP de sala única**, onde
 ---
 
 ## 🗂️ Estrutura do Projeto  
-
+```
 servidor-de-chat/
 ├── cliente.py
 ├── servidor.py
 ├── arquivos/ # Arquivos .txt temporários
 ├── README.md # Documentação
 └── requirements.txt # (Vazio - usamos só libs padrão)
-
+```
 
 ---
 
