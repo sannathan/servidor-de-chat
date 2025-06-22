@@ -7,7 +7,7 @@ from datetime import datetime
 IP_SERVIDOR = '0.0.0.0'
 PORTA_SERVIDOR = 3000
 
-BUFFER_SIZE = 2048
+BUFFER_SIZE = 1024  # 1024 Bytes
 
 # Criando o socket UDP
 server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -24,7 +24,6 @@ while True:
     
     try:
         data, addr = server_socket.recvfrom(BUFFER_SIZE) # Recebe até 2048 bytes
-
         texto = data.decode()
 
         #Verifica se é comando de entrada ou saída
@@ -39,6 +38,7 @@ while True:
                 if cliente != addr:
                     server_socket.sendto(mensagem.encode(), cliente)
                 continue
+
         elif texto.lower().startswith("bye"):
             nome = clientes.get(addr, "Desconhecido")
 
@@ -48,7 +48,7 @@ while True:
             mensagem = f"{nome} saiu da sala."
             for cliente in clientes:
                 if cliente != addr:
-                    server_socket.sendto(mensagem.enconde(), cliente)
+                    server_socket.sendto(mensagem.encode(), cliente)
             
             # Remover da lista
             if addr in clientes:
