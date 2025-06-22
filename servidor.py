@@ -23,7 +23,7 @@ arquivos = {}  # {'file_id': {'packets': {}, 'total': int, 'addr': (ip,port), 'u
 while True:
     
     try:
-        data, addr = server_socket.recvfrom(BUFFER_SIZE) # Recebe até 2048 bytes
+        data, addr = server_socket.recvfrom(BUFFER_SIZE) # Recebe até 1024 bytes
         texto = data.decode()
 
         #Verifica se é comando de entrada ou saída
