@@ -34,6 +34,9 @@ while True:
             clientes[addr] = nome
 
             print(f"{nome} ({addr}) entrou na sala.")
+
+            # Notificar outros clientes que uma nova pessoa entrou na sala
+            mensagem = f"{nome} entrou na sala."
             for cliente in clientes:
                 if cliente != addr:
                     server_socket.sendto(mensagem.encode(), cliente)
