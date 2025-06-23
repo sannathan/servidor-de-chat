@@ -13,5 +13,7 @@
 - Pessoa 1 e Pessoa 2 podem começar em paralelo (servidor e envio do cliente).  
 - Pessoa 3 entra logo depois que a comunicação básica servidor-cliente funciona, para implementar a recepção e threading.  
 
+### Feats extras
+- Utilizar a lib python-dotenv para trabalhar com arquivos .env e modularizar as variáveis de ambiente
 ---
 
