@@ -110,7 +110,7 @@ Threading para escutar mensagens e enviar mensagens simultaneamente.
 ## 👥 Equipe
 Nathan Barbosa
 
-Integrante 2
+Igor Vasconcelos
 
 Integrante 3
 
