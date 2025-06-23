@@ -33,10 +33,10 @@ while True:
             # Registrar cliente
             clientes[addr] = nome
 
-            print(f"{nome} ({addr}) entrou na sala.")
+            print(f"{nome} ({addr}) entrou na sala.\n")
 
             # Notificar outros clientes que uma nova pessoa entrou na sala
-            mensagem = f"{nome} entrou na sala."
+            mensagem = f"{nome} entrou na sala.\n"
             for cliente in clientes:
                 if cliente != addr:
                     server_socket.sendto(mensagem.encode(), cliente)
@@ -45,10 +45,10 @@ while True:
         elif texto.lower().startswith("bye"):
             nome = clientes.get(addr, "Desconhecido")
 
-            print(f"{nome} ({addr}) saiu da sala.")
+            print(f"{nome} ({addr}) saiu da sala.\n")
 
             # Notificar outros clientes
-            mensagem = f"{nome} saiu da sala."
+            mensagem = f"{nome} saiu da sala.\n"
             for cliente in clientes:
                 if cliente != addr:
                     server_socket.sendto(mensagem.encode(), cliente)
