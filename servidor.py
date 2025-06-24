@@ -1,13 +1,17 @@
 import socket
 import json
+import os
 from datetime import datetime
+from dotenv import load_dotenv
+
+# Carrega as variáveis do .env
+load_dotenv()
 
 # Configurações do servidor
 
-IP_SERVIDOR = '0.0.0.0'
-PORTA_SERVIDOR = 3000
-
-BUFFER_SIZE = 1024  # 1024 Bytes
+IP_SERVIDOR = os.getenv('SERVER_IP')
+PORTA_SERVIDOR = int(os.getenv('SERVER_PORT'))
+BUFFER_SIZE = int(os.getenv('BUFFER_SIZE')) # 1024 bytes
 
 # Criando o socket UDP
 server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

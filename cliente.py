@@ -1,11 +1,17 @@
 import socket
 import json
-from datetime import datetime
 import threading
+import os
+from datetime import datetime
+from dotenv import load_dotenv
 
-IP_SERVIDOR = '0.0.0.0'  # IP do servidor (todas interfaces)
-PORTA_SERVIDOR = 3000    # Porta do servidor
-TAMANHO_FRAGMENTO = 900  # Tamanho máximo de cada pedaço da mensagem
+#Carrega as variáveis de ambiente
+
+load_dotenv()
+
+IP_SERVIDOR = os.getenv('SERVER_IP')  # IP do servidor (todas interfaces)
+PORTA_SERVIDOR = int(os.getenv('SERVER_PORT'))    # Porta do servidor
+TAMANHO_FRAGMENTO = int(os.getenv('FRAGMENT_SIZE'))  # Tamanho máximo de cada pedaço da mensagem
 
 udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # Cria socket UDP
 DESTINO = (IP_SERVIDOR, PORTA_SERVIDOR)  # Destino para enviar mensagens
