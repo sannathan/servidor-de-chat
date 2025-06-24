@@ -1,6 +1,7 @@
 import socket
 import json
 from datetime import datetime
+import threading
 
 IP_SERVIDOR = '0.0.0.0'  # IP do servidor (todas interfaces)
 PORTA_SERVIDOR = 3000    # Porta do servidor
@@ -9,12 +10,22 @@ TAMANHO_FRAGMENTO = 900  # Tamanho máximo de cada pedaço da mensagem
 udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # Cria socket UDP
 DESTINO = (IP_SERVIDOR, PORTA_SERVIDOR)  # Destino para enviar mensagens
 
+def escutar_servidor(udp):
+    while True:
+        try:
+            dados, _ = udp.recvfrom(1024)
+            print("\n" + dados.decode())
+        except:
+            break  # opcional: tratar desconexão
+
+
 while True:
     comando = input()
 
     if comando.lower().startswith("hi, meu nome eh"):
         nome = comando[16:].strip()
-
+        thread_recebimento = threading.Thread(target=escutar_servidor, args=(udp,), daemon=True)
+        thread_recebimento.start()
         try:
             udp.sendto(comando.encode(), DESTINO)  # Envia comando de entrada
         except Exception as e:
