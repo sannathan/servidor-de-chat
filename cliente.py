@@ -4,8 +4,8 @@ from datetime import datetime
 import threading
 
 IP_SERVIDOR = '0.0.0.0'  # IP do servidor (todas interfaces)
-PORTA_SERVIDOR = 3000    # Porta do servidor
-TAMANHO_FRAGMENTO = 900  # Tamanho máximo de cada pedaço da mensagem
+PORTA_SERVIDOR = 2000    # Porta do servidor
+TAMANHO_FRAGMENTO = 800  # Tamanho máximo de cada pedaço da mensagem menor que 1024 para garantir que somado com cabeçalho não passe
 
 udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # Cria socket UDP
 DESTINO = (IP_SERVIDOR, PORTA_SERVIDOR)  # Destino para enviar mensagens

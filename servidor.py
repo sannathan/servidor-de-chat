@@ -5,7 +5,7 @@ from datetime import datetime
 # Configurações do servidor
 
 IP_SERVIDOR = '0.0.0.0'
-PORTA_SERVIDOR = 3000
+PORTA_SERVIDOR = 2000
 
 BUFFER_SIZE = 1024  # 1024 Bytes
 
