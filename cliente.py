@@ -2,7 +2,7 @@ import socket
 import json
 from datetime import datetime
 import threading
-from rdt3_protocol_utils import make_packet, is_ack, is_corrupted, extract_data, make_ack, simulate_corruption
+from protocolrdt3 import make_packet, is_ack, is_corrupted, extract_data, make_ack, simulate_corruption
 
 IP_SERVIDOR = '0.0.0.0'  # IP do servidor (todas interfaces)
 PORTA_SERVIDOR = 2000    # Porta do servidor
