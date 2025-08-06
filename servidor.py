@@ -1,130 +1,148 @@
 import socket
 import json
 from datetime import datetime
+from protocolrdt3 import is_corrupted, make_ack, extract_data
 
-# Configurações do servidor
+# ===== CONFIGURAÇÕES DO SERVIDOR =====
+IP_SERVIDOR = '0.0.0.0'    # Escuta em todas as interfaces de rede
+PORTA_SERVIDOR = 2000       # Porta onde o servidor irá escutar
+BUFFER_SIZE = 2048          # Tamanho máximo do buffer para recebimento
 
-IP_SERVIDOR = '0.0.0.0'
-PORTA_SERVIDOR = 2000
+# ===== ESTRUTURAS DE DADOS GLOBAIS =====
+# Dicionário de clientes conectados
+# Formato: {(ip, porta_envio): {'nome': 'nome_usuario', 'receive_addr': (ip, porta_recebimento)}}
+clientes = {}
 
-BUFFER_SIZE = 1024  # 1024 Bytes
+# Dicionário para armazenar arquivos sendo recebidos em fragmentos
+# Formato: {'file_id': {'packets': {num_pacote: conteudo}, 'total': total_pacotes, 'username': 'nome'}}
+arquivos = {}
 
-# Criando o socket UDP
+# Controle de números de sequência do protocolo RDT3 para cada cliente
+# Formato: {(ip, porta): ultimo_num_seq_confirmado}
+ultimo_ack = {}
+
+# ===== INICIALIZAÇÃO DO SERVIDOR =====
+# Criar socket UDP
 server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+server_socket.bind((IP_SERVIDOR, PORTA_SERVIDOR))
+print(f"🛰️ Servidor RDT 3.0 rodando na porta {PORTA_SERVIDOR}...")
 
-# Associando o IP e porta
-server_socket.bind((IP_SERVIDOR, PORTA_SERVIDOR)) # Porta do servidor
-print(f"🛰️ Servidor UDP esperando conexões na porta {PORTA_SERVIDOR}")
-
-# Estruturas para armazenar estado
-clientes = {}  # {'(ip, porta)': 'nome_usuario'}
-arquivos = {}  # {'file_id': {'packets': {}, 'total': int, 'addr': (ip,port), 'username': str}}
-
+# ===== LOOP PRINCIPAL DO SERVIDOR =====
 while True:
-    
     try:
-        data, addr = server_socket.recvfrom(BUFFER_SIZE) # Recebe até 1024 bytes
-        texto = data.decode()
+        # Recebe dados de qualquer cliente
+        data, addr = server_socket.recvfrom(BUFFER_SIZE)
 
-        #Verifica se é comando de entrada ou saída
-        if texto.lower().startswith("hi, meu nome eh"):
-            nome = texto[16:].strip()
-
-            # Registrar cliente
-            clientes[addr] = nome
-
-            print(f"{nome} ({addr}) entrou na sala.\n")
-
-            # Notificar outros clientes que uma nova pessoa entrou na sala
-            mensagem = f"{nome} entrou na sala.\n"
-            for cliente in clientes:
-                if cliente != addr:
-                    server_socket.sendto(mensagem.encode(), cliente)
-                continue
-
-        elif texto.lower().startswith("bye"):
-            nome = clientes.get(addr, "Desconhecido")
-
-            print(f"{nome} ({addr}) saiu da sala.\n")
-
-            # Notificar outros clientes
-            mensagem = f"{nome} saiu da sala.\n"
-            for cliente in clientes:
-                if cliente != addr:
-                    server_socket.sendto(mensagem.encode(), cliente)
-            
-            # Remover da lista
-            if addr in clientes:
-                del clientes[addr]
+        # ===== ETAPA 1: VERIFICAÇÃO DE CORRUPÇÃO =====
+        if is_corrupted(data):
+            print(f"[CORRUPÇÃO] Pacote de {addr}, reenviando ACK último válido {ultimo_ack.get(addr, -1)}")
+            # Reenvia o último ACK válido
+            ack = make_ack(ultimo_ack.get(addr, -1))
+            server_socket.sendto(ack, addr)
             continue
-        
-        # Se não é comando, deve ser pacote JSON de mensagem
-        else:
-            try:
-                pacote = json.loads(texto)
 
-            except:
-                print(f"Pacote inválido de {addr}: {texto}")
-                continue
+        # ===== ETAPA 2: EXTRAÇÃO DOS DADOS =====
+        seq_num, payload = extract_data(data)
+        mensagem_str = payload.decode()
+
+        # ===== ETAPA 3: ENVIO DE ACK =====
+        ack = make_ack(seq_num)
+        server_socket.sendto(ack, addr)
+        ultimo_ack[addr] = seq_num
+        print(f"[ACK] Enviado ACK {seq_num} para {clientes.get(addr, {}).get('nome', '?')}")
+
+        # ===== ETAPA 4: TRATAMENTO DE COMANDOS =====
+        
+        # === COMANDO DE ENTRADA ===
+        if mensagem_str.lower().startswith("hi, meu nome eh"):
+            # Extrai nome e porta de recebimento do comando
+            if ":" in mensagem_str:
+                nome_parte, receive_port_str = mensagem_str.rsplit(":", 1)
+                nome = nome_parte[16:].strip()  # Remove "hi, meu nome eh "
+                receive_port = int(receive_port_str)
+            else:
+                # Fallback: usa mesma porta se não especificada
+                nome = mensagem_str[16:].strip()
+                receive_port = addr[1]
             
-            # Extrair dados do pacote
-            file_id = pacote.get("file_id")
-            packet_num = pacote.get("packet_num")
-            total_packets = pacote.get("total_packets")
-            username = pacote.get("username")
-            conteudo_pacote = pacote.get("data")
+            ip = addr[0]
+            receive_addr = (ip, receive_port)
+            
+            # Registra cliente com suas informações
+            clientes[addr] = {'nome': nome, 'receive_addr': receive_addr}
+            ultimo_ack[addr] = -1  # Reseta controle de sequência
+            print(f"[CONECTADO] {nome} entrou ({addr}) - recebe em {receive_addr}")
 
-            if None in [file_id, packet_num, total_packets, username, conteudo_pacote]:
-                print(f"Pacote mal formatado de {addr}: {pacote}")
-                continue
+            # Notifica outros clientes sobre a entrada
+            msg = f"{nome} entrou na sala."
+            for cliente_addr, cliente_info in clientes.items():
+                if cliente_addr != addr:  # Não envia para quem entrou
+                    server_socket.sendto(msg.encode(), cliente_info['receive_addr'])
+            continue
 
-            #Armazenar os pedaços
-            if file_id not in arquivos:
-                arquivos[file_id] = {
-                    "packets": {},
-                    "total": total_packets,
-                    "addr": addr,
-                    "username": username
-                }
+        # === COMANDO DE SAÍDA ===
+        elif mensagem_str.lower() == "bye":
+            cliente_info = clientes.get(addr, {})
+            nome = cliente_info.get('nome', 'Desconhecido')
+            print(f"[DESCONECTADO] {nome} saiu ({addr})")
 
-            arquivos[file_id]["packets"][packet_num] = conteudo_pacote
+            # Notifica outros clientes sobre a saída
+            msg = f"{nome} saiu da sala."
+            for cliente_addr, info in clientes.items():
+                if cliente_addr != addr:  # Não envia para quem saiu
+                    server_socket.sendto(msg.encode(), info['receive_addr'])
 
-            print(f"Recebido pacote {packet_num}/{total_packets} de {username} ({addr})")
+            # Remove cliente das estruturas de dados
+            clientes.pop(addr, None)
+            ultimo_ack.pop(addr, None)
+            continue
 
-        
+        # ===== ETAPA 5: TRATAMENTO DE MENSAGENS/FRAGMENTOS =====
+        try:
+            # Tenta fazer parse do JSON da mensagem
+            pacote = json.loads(mensagem_str)
+        except json.JSONDecodeError:
+            print(f"[ERRO] Mensagem recebida não é JSON válido: {mensagem_str}")
+            continue
 
-            # Verificar se o arquivo está completo
-            if len(arquivos[file_id]["packets"]) == total_packets: 
-                print(f"Arquivo completo de {username} ({addr})")
+        # Extrai informações do pacote JSON
+        file_id = pacote["file_id"]           # ID único do arquivo
+        total = pacote["total_packets"]       # Total de fragmentos esperados
+        username = pacote["username"]         # Nome do usuário que enviou
+        conteudo = pacote["data"]            # Conteúdo deste fragmento
 
-                # Ordenar pacotes e reconstruir
-                conteudo = ''.join(
-                    arquivos[file_id]["packets"][i]
-                    for i in range(1, total_packets + 1)
-                )
+        # Inicializa estrutura para o arquivo se for o primeiro fragmento
+        if file_id not in arquivos:
+            arquivos[file_id] = {
+                "packets": {},              # Dicionário dos fragmentos recebidos
+                "total": total,            # Total de fragmentos esperados
+                "username": username       # Nome do usuário
+            }
 
-                # Gerar timestamp
-                ip, porta = addr
-                timestamp = datetime.now().strftime('%H:%M:%S %d/%m/%Y')
+        # Armazena o fragmento recebido
+        arquivos[file_id]["packets"][pacote["packet_num"]] = conteudo
+        print(f"[PACOTE] Recebido {pacote['packet_num']}/{total} de {username}")
 
-                # Formatar mensagem
-                mensagem_formatada = f"{ip}:{porta}/~{username}: {conteudo} {timestamp}"
-                print(mensagem_formatada)
+        # ===== ETAPA 6: VERIFICAÇÃO SE ARQUIVO ESTÁ COMPLETO =====
+        if len(arquivos[file_id]["packets"]) == total:
+            # Reconstrói a mensagem completa na ordem correta
+            mensagem_completa = "".join(
+                arquivos[file_id]["packets"][i] for i in range(1, total + 1)
+            )
+            
+            # Formata mensagem com informações do remetente e timestamp
+            ip, porta = addr
+            timestamp = datetime.now().strftime("%H:%M:%S %d/%m/%Y")
+            mensagem_formatada = f"{ip}:{porta}/~{username}: {mensagem_completa} {timestamp}"
+            print(f"[MSG] {mensagem_formatada}")
 
-                # Reenviar para todos os outros clientes
-                for cliente in clientes:
-                    if cliente != addr:
-                        server_socket.sendto(mensagem_formatada.encode(), cliente)
+            # ===== ETAPA 7: BROADCAST PARA TODOS OS CLIENTES =====
+            for cliente_addr, cliente_info in clientes.items():
+                if cliente_addr != addr:  # Não reenvia para o remetente
+                    server_socket.sendto(mensagem_formatada.encode(), cliente_info['receive_addr'])
 
+            # Remove arquivo processado da memória
+            del arquivos[file_id]
 
-                # Limpar estado do arquivo
-                del arquivos[file_id]
     except Exception as e:
-        print(f"Erro: {e}")
-    
-
-
-
-
-
-
+        print(f"[ERRO] {e}")
