@@ -2,16 +2,22 @@ import socket
 import json
 from datetime import datetime
 import threading
-from protocolrdt3 import make_packet, is_ack, is_corrupted, extract_data, make_ack, simulate_corruption
+from protocolrdt3 import make_packet, is_corrupted, extract_data, simulate_corruption
 
-IP_SERVIDOR = '0.0.0.0'  # IP do servidor (todas interfaces)
-PORTA_SERVIDOR = 2000    # Porta do servidor
-TAMANHO_FRAGMENTO = 800  # Tamanho máximo de cada pedaço da mensagem menor que 1024 para garantir que somado com cabeçalho não passe
-TIMEOUT = 2 #segundos
+IP_SERVIDOR = '127.0.0.1'  # Ajuste para o IP do servidor real
+PORTA_SERVIDOR = 2000
+TAMANHO_FRAGMENTO = 800
+TIMEOUT = 2
 DESTINO = (IP_SERVIDOR, PORTA_SERVIDOR)
 
-client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-client_socket.settimeout(TIMEOUT)
+# Socket para enviar dados e receber ACKs
+send_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+send_socket.settimeout(TIMEOUT)
+
+# Socket para receber mensagens do chat
+receive_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+receive_socket.bind(('', 0))  # Porta automática para receber mensagens
+
 seq_num = 0
 
 def escutar_servidor(sock):
@@ -22,47 +28,47 @@ def escutar_servidor(sock):
         except:
             break
 
-
-def send_message_rdt3(message):
+def send_message_rdt3(message_bytes: bytes):
+    """Envia mensagem usando RDT 3.0 garantindo ACK."""
     global seq_num
-    packet = make_packet(message.encode('utf-8'), seq_num)
-
     while True:
-        print(f"[CLIENT] Enviando pacote com seq_num={seq_num}")
-        client_socket.sendto(packet, DESTINO)
+        packet = make_packet(message_bytes, seq_num)
+
+        print(f"[CLIENT] Enviando pacote seq_num={seq_num}")
+        send_socket.sendto(packet, DESTINO)
 
         try:
-            ack_data, _ = client_socket.recvfrom(1024)
-            print("[CLIENT] ACK recebido")
+            ack_data, _ = send_socket.recvfrom(1024)
+            ack_seq, _ = extract_data(ack_data)
 
-            if is_corrupted(ack_data):
-                print("[CLIENT] ACK corrompido, reenviando pacote...")
-                continue
-
-            ack_pkt = ack_data.decode('utf-8')
-            ack_pkt = eval(ack_pkt)
-            if ack_pkt['seq_num'] == seq_num:
-                print(f"[CLIENT] ACK válido recebido para seq_num={seq_num}")
+            if ack_seq == seq_num:
+                print(f"[CLIENT] ACK válido para seq_num={seq_num}")
                 seq_num = 1 - seq_num
                 break
             else:
-                print("[CLIENT] ACK duplicado, reenviando pacote...")
-
+                print("[CLIENT] ACK duplicado, reenviando...")
         except socket.timeout:
-            print("[CLIENT] Timeout! Reenviando pacote...")
+            print("[CLIENT] Timeout! Reenviando...")
+
+# Inicia thread para escutar servidor usando socket de recebimento
+threading.Thread(target=escutar_servidor, args=(receive_socket,), daemon=True).start()
 
 while True:
     comando = input()
 
     if comando.lower().startswith("hi, meu nome eh"):
         nome = comando[16:].strip()
-        thread_recebimento = threading.Thread(target=escutar_servidor, args=(client_socket,), daemon=True)
-        thread_recebimento.start()
+
         try:
-            send_message_rdt3(comando)
-                    # Envia comando de entrada
+            # Obter porta do socket de recebimento
+            receive_port = receive_socket.getsockname()[1]
+            
+            # Modificar comando para incluir porta de recebimento
+            comando_com_porta = f"{comando}:{receive_port}"
+            
+            send_message_rdt3(comando_com_porta.encode('utf-8'))
         except Exception as e:
-            print(f"Erro ao enviar nome para o servidor: {e}")
+            print(f"Erro ao enviar nome: {e}")
             continue
 
         print(f"Você entrou na sala como {nome}.")
@@ -70,47 +76,50 @@ while True:
         while True:
             comando = input()
 
-            if comando == "bye":
+            if comando.lower() == "bye":
                 try:
-                    send_message_rdt3(comando) # Envia comando de saída
+                    send_message_rdt3(comando.encode('utf-8'))
                 except Exception as e:
                     print(f"Erro ao enviar bye: {e}")
                 break
 
             else:
                 agora = datetime.now().strftime("%H%M%S")
-                nome_arquivo = f"arquivos/msg_{agora}.txt"  # Nome do arquivo temporário
+                nome_arquivo = f"arquivos/msg_{agora}.txt"
 
                 try:
+                    # Salva mensagem em arquivo
                     with open(nome_arquivo, "w") as f:
-                        f.write(comando)  # Salva mensagem no arquivo
-                    with open(nome_arquivo, "rb") as f:
-                        conteudo = f.read()  # Lê conteúdo em bytes
+                        f.write(comando)
 
-                    # Divide o conteúdo em pedaços de até TAMANHO_FRAGMENTO bytes
+                    # Lê conteúdo
+                    with open(nome_arquivo, "r") as f:
+                        conteudo = f.read()
+
+                    # Fragmenta
                     blocos = [conteudo[i:i+TAMANHO_FRAGMENTO] for i in range(0, len(conteudo), TAMANHO_FRAGMENTO)]
                     total = len(blocos)
-                    file_id = datetime.now().strftime("%H%M%S")  # ID do arquivo
+                    file_id = datetime.now().strftime("%H%M%S")
 
                     for i, bloco in enumerate(blocos):
-                        pacote = {
+                        pacote_dict = {
                             "file_id": file_id,
                             "packet_num": i + 1,
                             "total_packets": total,
                             "username": nome,
-                            "data": bloco.decode('utf-8', errors='ignore')  # Decodifica para texto
+                            "data": bloco
                         }
-                        mensagem_json = json.dumps(pacote)
-                        send_message_rdt3(mensagem_json)  # Envia cada pacote
+                        mensagem_json = json.dumps(pacote_dict).encode('utf-8')
+                        send_message_rdt3(mensagem_json)
 
                 except FileNotFoundError:
-                    print("Erro: a pasta 'arquivos/' não existe. Crie a pasta e tente novamente.")
+                    print("Erro: a pasta 'arquivos/' não existe.")
                     continue
                 except Exception as e:
-                    print(f"Erro ao salvar a mensagem em arquivo: {e}")
+                    print(f"Erro ao processar mensagem: {e}")
                     continue
 
-        break  # Sai do loop principal após sair da sala
+        break
 
     else:
         print("Comando inválido. Use: hi, meu nome eh <seu_nome>")

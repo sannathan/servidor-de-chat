@@ -1,151 +1,118 @@
 import socket
 import json
-import zlib
 from datetime import datetime
+from protocolrdt3 import is_corrupted, make_ack, extract_data
 
-# ========================
-# Configurações do servidor
-# ========================
+# Configuração
 IP_SERVIDOR = '0.0.0.0'
 PORTA_SERVIDOR = 2000
-BUFFER_SIZE = 1024  # 1024 Bytes
+BUFFER_SIZE = 2048
 
-# Criando o socket UDP
+# Estruturas de estado
+clientes = {}       # {(ip, porta_envio): {'nome': 'nome_usuario', 'receive_port': porta_recebimento}}
+arquivos = {}       # {'file_id': {'packets': {}, 'total': int, 'username': str}}
+ultimo_ack = {}     # {(ip, porta): ultimo_num_seq}
+
+# Criar socket UDP
 server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 server_socket.bind((IP_SERVIDOR, PORTA_SERVIDOR))
+print(f"🛰️ Servidor RDT 3.0 rodando na porta {PORTA_SERVIDOR}...")
 
-print(f"🛰️ Servidor UDP RDT 3.0 esperando conexões na porta {PORTA_SERVIDOR}")
-
-# ========================
-# Estruturas de estado
-# ========================
-clientes = {}        # {(ip, porta): 'nome_usuario'}
-arquivos = {}        # {'file_id': {'packets': {}, 'total': int, 'addr': (ip,port), 'username': str}}
-ultimo_ack = {}      # {(ip, porta): ultimo_num_seq}
-
-# ========================
-# Função para calcular checksum
-# ========================
-def calcular_checksum(dados: str) -> int:
-    return zlib.crc32(dados.encode())
-
-# ========================
-# Loop principal do servidor
-# ========================
 while True:
     try:
         data, addr = server_socket.recvfrom(BUFFER_SIZE)
-        texto = data.decode()
 
-        # ========================
-        # 1. Comandos de entrada/saída
-        # ========================
-        if texto.lower().startswith("hi, meu nome eh"):
-            nome = texto[16:].strip()
-            clientes[addr] = nome
-            ultimo_ack[addr] = -1  # Inicializa o controle de ACK
-
-            print(f"[CONECTADO] {nome} ({addr}) entrou na sala.\n")
-
-            # Notificar os outros clientes
-            mensagem = f"{nome} entrou na sala.\n"
-            for cliente in clientes:
-                if cliente != addr:
-                    server_socket.sendto(mensagem.encode(), cliente)
+        # 1️⃣ Verifica corrupção
+        if is_corrupted(data):
+            print(f"[CORRUPÇÃO] Pacote de {addr}, reenviando ACK último válido {ultimo_ack.get(addr, -1)}")
+            ack = make_ack(ultimo_ack.get(addr, -1))
+            server_socket.sendto(ack, addr)
             continue
 
-        elif texto.lower().startswith("bye"):
-            nome = clientes.get(addr, "Desconhecido")
-            print(f"[DESCONECTADO] {nome} ({addr}) saiu da sala.\n")
+        # 2️⃣ Extrai número de sequência e payload
+        seq_num, payload = extract_data(data)
+        mensagem_str = payload.decode()
 
-            # Notificar outros clientes
-            mensagem = f"{nome} saiu da sala.\n"
-            for cliente in clientes:
-                if cliente != addr:
-                    server_socket.sendto(mensagem.encode(), cliente)
+        # 3️⃣ Envia ACK
+        ack = make_ack(seq_num)
+        server_socket.sendto(ack, addr)
+        ultimo_ack[addr] = seq_num
+        print(f"[ACK] Enviado ACK {seq_num} para {clientes.get(addr, {}).get('nome', '?')}")
 
-            # Remover cliente
+        # 4️⃣ Trata comandos de entrada e saída
+        if mensagem_str.lower().startswith("hi, meu nome eh"):
+            # Extrai nome e porta de recebimento
+            if ":" in mensagem_str:
+                nome_parte, receive_port_str = mensagem_str.rsplit(":", 1)
+                nome = nome_parte[16:].strip()
+                receive_port = int(receive_port_str)
+            else:
+                nome = mensagem_str[16:].strip()
+                receive_port = addr[1]  # Usa mesma porta se não especificada
+            
+            ip = addr[0]
+            receive_addr = (ip, receive_port)
+            
+            clientes[addr] = {'nome': nome, 'receive_addr': receive_addr}
+            ultimo_ack[addr] = -1
+            print(f"[CONECTADO] {nome} entrou ({addr}) - recebe em {receive_addr}")
+
+            # Notificar outros
+            msg = f"{nome} entrou na sala."
+            for cliente_addr, cliente_info in clientes.items():
+                if cliente_addr != addr:
+                    server_socket.sendto(msg.encode(), cliente_info['receive_addr'])
+            continue
+
+        elif mensagem_str.lower() == "bye":
+            cliente_info = clientes.get(addr, {})
+            nome = cliente_info.get('nome', 'Desconhecido')
+            print(f"[DESCONECTADO] {nome} saiu ({addr})")
+
+            # Notificar outros
+            msg = f"{nome} saiu da sala."
+            for cliente_addr, info in clientes.items():
+                if cliente_addr != addr:
+                    server_socket.sendto(msg.encode(), info['receive_addr'])
+
             clientes.pop(addr, None)
             ultimo_ack.pop(addr, None)
             continue
 
-        # ========================
-        # 2. Recebendo pacote de mensagem
-        # ========================
+        # 5️⃣ Trata pacote JSON de mensagem/fragmento
         try:
-            pacote = json.loads(texto)
-        except:
-            print(f"[ERRO] Pacote inválido de {addr}: {texto}")
+            pacote = json.loads(mensagem_str)
+        except json.JSONDecodeError:
+            print(f"[ERRO] Mensagem recebida não é JSON válido: {mensagem_str}")
             continue
 
-        # Extração de dados do pacote
-        file_id = pacote.get("file_id")
-        packet_num = pacote.get("packet_num")
-        total_packets = pacote.get("total_packets")
-        username = pacote.get("username")
-        conteudo_pacote = pacote.get("data")
-        checksum = pacote.get("checksum")
+        file_id = pacote["file_id"]
+        total = pacote["total_packets"]
+        username = pacote["username"]
+        conteudo = pacote["data"]
 
-        if None in [file_id, packet_num, total_packets, username, conteudo_pacote, checksum]:
-            print(f"[ERRO] Pacote mal formatado de {addr}: {pacote}")
-            continue
-
-        # ========================
-        # 3. Verificação de integridade
-        # ========================
-        if calcular_checksum(conteudo_pacote) != checksum:
-            print(f"[CORRUPÇÃO] Pacote {packet_num} de {username} corrompido. Reenviando último ACK válido ({ultimo_ack[addr]})")
-            ack = {"ack_num": ultimo_ack[addr]}
-            server_socket.sendto(json.dumps(ack).encode(), addr)
-            continue
-
-        # ========================
-        # 4. ACK positivo
-        # ========================
-        ack = {"ack_num": packet_num}
-        server_socket.sendto(json.dumps(ack).encode(), addr)
-        ultimo_ack[addr] = packet_num
-        print(f"[ACK] Enviado ACK para pacote {packet_num} de {username}")
-
-        # ========================
-        # 5. Armazenamento do pacote
-        # ========================
         if file_id not in arquivos:
-            arquivos[file_id] = {
-                "packets": {},
-                "total": total_packets,
-                "addr": addr,
-                "username": username
-            }
+            arquivos[file_id] = {"packets": {}, "total": total, "username": username}
 
-        arquivos[file_id]["packets"][packet_num] = conteudo_pacote
-        print(f"[PACOTE] Recebido {packet_num}/{total_packets} de {username} ({addr})")
+        arquivos[file_id]["packets"][pacote["packet_num"]] = conteudo
+        print(f"[PACOTE] Recebido {pacote['packet_num']}/{total} de {username}")
 
-        # ========================
-        # 6. Verificação de completude
-        # ========================
-        if len(arquivos[file_id]["packets"]) == total_packets:
-            print(f"[COMPLETE] Arquivo completo de {username} ({addr})")
-
-            # Reconstituir conteúdo
-            conteudo = ''.join(
-                arquivos[file_id]["packets"][i]
-                for i in range(total_packets)
+        # 6️⃣ Monta a mensagem final se o arquivo estiver completo
+        if len(arquivos[file_id]["packets"]) == total:
+            mensagem_completa = "".join(
+                arquivos[file_id]["packets"][i] for i in range(1, total + 1)
             )
-
-            # Formatar mensagem final
             ip, porta = addr
-            timestamp = datetime.now().strftime('%H:%M:%S %d/%m/%Y')
-            mensagem_formatada = f"{ip}:{porta}/~{username}: {conteudo} {timestamp}"
+            timestamp = datetime.now().strftime("%H:%M:%S %d/%m/%Y")
+            mensagem_formatada = f"{ip}:{porta}/~{username}: {mensagem_completa} {timestamp}"
             print(f"[MSG] {mensagem_formatada}")
 
-            # Broadcast para os outros clientes
-            for cliente in clientes:
-                if cliente != addr:
-                    server_socket.sendto(mensagem_formatada.encode(), cliente)
+            # Enviar para todos
+            for cliente_addr, cliente_info in clientes.items():
+                if cliente_addr != addr:
+                    server_socket.sendto(mensagem_formatada.encode(), cliente_info['receive_addr'])
 
-            # Limpar dados do arquivo
             del arquivos[file_id]
 
     except Exception as e:
-        print(f"[ERRO GERAL] {e}")
+        print(f"[ERRO] {e}")
